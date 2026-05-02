@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+myenv/
+venv/
+.venv/
+
+# pytest
+.pytest_cache/
+
+# Database
+data/app.db
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Streamlit
+.streamlit/secrets.toml
