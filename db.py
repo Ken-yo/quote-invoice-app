@@ -17,15 +17,16 @@ def init_db():
 
         cursor.execute(
             """
-            CREATE TABLE IF NOT EXISTS customers (
+            CREATE TABLE IF NOT EXISTS customer_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_name TEXT NOT NULL,
-                postal_code TEXT,
-                address TEXT,
-                contact_name TEXT,
-                email TEXT,
-                phone TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                customer_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                default_quantity INTEGER DEFAULT 1,
+                unit_price INTEGER NOT NULL,
+                description TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(customer_id) REFERENCES customers(id),
+                UNIQUE(customer_id, name)
             )
             """
         )
@@ -334,3 +335,97 @@ def add_customers_bulk(customers: List[Dict]) -> Dict[str, int]:
         "inserted_count": inserted_count,
         "skipped_count": skipped_count,
     }
+    
+def add_customer_item(
+    customer_id: int,
+    name: str,
+    default_quantity: int,
+    unit_price: int,
+    description: str,
+) -> int:
+    """
+    顧客ごとの品目を登録する。
+    同じ顧客に同じ品目名がある場合は登録しない。
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO customer_items (
+                customer_id,
+                name,
+                default_quantity,
+                unit_price,
+                description
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                customer_id,
+                name,
+                default_quantity,
+                unit_price,
+                description,
+            ),
+        )
+
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def get_customer_items(customer_id: int) -> List[Dict]:
+    """
+    指定した顧客の品目リストを取得する。
+    """
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                customer_id,
+                name,
+                default_quantity,
+                unit_price,
+                description
+            FROM customer_items
+            WHERE customer_id = ?
+            ORDER BY id ASC
+            """,
+            (customer_id,),
+        )
+
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_all_customer_items() -> List[Dict]:
+    """
+    顧客名付きで品目一覧を取得する。
+    """
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                customer_items.id,
+                customers.company_name,
+                customer_items.name,
+                customer_items.default_quantity,
+                customer_items.unit_price,
+                customer_items.description,
+                customer_items.created_at
+            FROM customer_items
+            JOIN customers
+                ON customer_items.customer_id = customers.id
+            ORDER BY customer_items.id DESC
+            """
+        )
+
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]

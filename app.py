@@ -7,11 +7,15 @@ from db import (
     add_customer,
     add_customers_bulk,
     add_document,
+    add_customer_item,
+    get_customer_items,
+    get_all_customer_items,
     get_customer,
     get_customers,
     get_documents,
     init_db,
     update_document_no,
+    
 )
 from invoice_logic import (
     calculate_totals,
@@ -31,12 +35,15 @@ def main():
     st.title("見積・請求書作成アプリ")
     st.write("顧客登録、見積書・請求書作成、Excel出力を行う業務アプリです。")
 
-    tab_customer, tab_document, tab_history = st.tabs(
-        ["顧客登録", "見積・請求書作成", "作成履歴"]
+    tab_customer, tab_item, tab_document, tab_history = st.tabs(
+        ["顧客登録", "品目マスタ", "見積・請求書作成", "作成履歴"]
     )
 
     with tab_customer:
         show_customer_form()
+
+    with tab_item:
+        show_customer_item_master()
 
     with tab_document:
         show_document_form()
@@ -123,6 +130,93 @@ def show_customer_form():
     else:
         st.info("まだ顧客が登録されていません。")
 
+def show_customer_item_master():
+    st.subheader("顧客別 品目マスタ")
+
+    customers = get_customers()
+
+    if not customers:
+        st.warning("先に顧客を登録してください。")
+        return
+
+    customer_options = {
+        f"{customer['company_name']} / ID:{customer['id']}": customer["id"]
+        for customer in customers
+    }
+
+    selected_customer_label = st.selectbox(
+        "顧客を選択",
+        list(customer_options.keys()),
+        key="item_master_customer",
+    )
+
+    customer_id = customer_options[selected_customer_label]
+
+    st.write("選択した顧客に紐づく品目を登録します。")
+
+    with st.form("customer_item_form"):
+        name = st.text_input(
+            "品目名",
+            placeholder="例：要件定義、画面実装、月額保守費",
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            default_quantity = st.number_input(
+                "標準数量",
+                min_value=1,
+                value=1,
+                step=1,
+            )
+
+        with col2:
+            unit_price = st.number_input(
+                "単価",
+                min_value=0,
+                value=0,
+                step=1000,
+            )
+
+        description = st.text_area(
+            "説明",
+            placeholder="例：ヒアリング、要件整理、仕様書作成を含む",
+        )
+
+        submitted = st.form_submit_button("品目を登録")
+
+    if submitted:
+        if not name:
+            st.error("品目名は必須です。")
+            return
+
+        add_customer_item(
+            customer_id=customer_id,
+            name=name,
+            default_quantity=int(default_quantity),
+            unit_price=int(unit_price),
+            description=description,
+        )
+
+        st.success("品目を登録しました。")
+
+    st.subheader("この顧客の登録済み品目")
+
+    customer_items = get_customer_items(customer_id)
+
+    if customer_items:
+        st.dataframe(pd.DataFrame(customer_items), use_container_width=True)
+    else:
+        st.info("この顧客にはまだ品目が登録されていません。")
+
+    st.subheader("全顧客の品目一覧")
+
+    all_items = get_all_customer_items()
+
+    if all_items:
+        st.dataframe(pd.DataFrame(all_items), use_container_width=True)
+    else:
+        st.info("まだ品目は登録されていません。")
 
 def show_document_form():
     st.subheader("見積・請求書作成")
@@ -173,38 +267,85 @@ def show_document_form():
         step=1,
     )
 
+    customer_items = get_customer_items(customer_id)
+
     items = []
 
     for index in range(item_count):
         st.write(f"明細 {index + 1}")
 
+        item_options = {"手入力する": None}
+
+        for customer_item in customer_items:
+            label = (
+                f"{customer_item['name']} "
+                f"/ 標準数量: {customer_item['default_quantity']} "
+                f"/ 単価: {customer_item['unit_price']:,}円"
+            )
+            item_options[label] = customer_item
+
+        selected_item_label = st.selectbox(
+            "品目リスト",
+            list(item_options.keys()),
+            key=f"item_select_{customer_id}_{index}",
+        )
+
+        selected_item = item_options[selected_item_label]
+
         col_name, col_quantity, col_unit_price = st.columns([3, 1, 1])
 
-        with col_name:
-            name = st.text_input(
-                "品目",
-                value="",
-                key=f"name_{index}",
-                placeholder="例：要件定義、画面実装、テスト",
-            )
+        if selected_item is None:
+            with col_name:
+                name = st.text_input(
+                    "品目",
+                    value="",
+                    key=f"name_manual_{customer_id}_{index}",
+                    placeholder="例：要件定義、画面実装、テスト",
+                )
 
-        with col_quantity:
-            quantity = st.number_input(
-                "数量",
-                min_value=0,
-                value=1,
-                step=1,
-                key=f"quantity_{index}",
-            )
+            with col_quantity:
+                quantity = st.number_input(
+                    "数量",
+                    min_value=0,
+                    value=1,
+                    step=1,
+                    key=f"quantity_manual_{customer_id}_{index}",
+                )
 
-        with col_unit_price:
-            unit_price = st.number_input(
-                "単価",
-                min_value=0,
-                value=0,
-                step=1000,
-                key=f"unit_price_{index}",
-            )
+            with col_unit_price:
+                unit_price = st.number_input(
+                    "単価",
+                    min_value=0,
+                    value=0,
+                    step=1000,
+                    key=f"unit_price_manual_{customer_id}_{index}",
+                )
+
+        else:
+            with col_name:
+                name = st.text_input(
+                    "品目",
+                    value=selected_item["name"],
+                    key=f"name_master_{customer_id}_{index}_{selected_item['id']}",
+                )
+
+            with col_quantity:
+                quantity = st.number_input(
+                    "数量",
+                    min_value=0,
+                    value=int(selected_item["default_quantity"]),
+                    step=1,
+                    key=f"quantity_master_{customer_id}_{index}_{selected_item['id']}",
+                )
+
+            with col_unit_price:
+                unit_price = st.number_input(
+                    "単価",
+                    min_value=0,
+                    value=int(selected_item["unit_price"]),
+                    step=1000,
+                    key=f"unit_price_master_{customer_id}_{index}_{selected_item['id']}",
+                )
 
         if name:
             items.append(
